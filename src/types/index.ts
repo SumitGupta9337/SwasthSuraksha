@@ -28,6 +28,9 @@ export interface Hospital {
     general: number;
   };
   lastUpdated: Date;
+  distanceText?: string;
+durationText?: string;
+
 }
 
 export interface EmergencyRequest {

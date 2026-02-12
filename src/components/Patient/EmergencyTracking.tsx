@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, MapPin, Phone, Truck, Building2 } from 'lucide-react';
+import { Clock, MapPin, Phone, Truck, Navigation } from 'lucide-react';
 import { GoogleMap } from '../Map/GoogleMap';
 import { emergencyService, ambulanceService, hospitalService } from '../../services/firebaseService';
 import { EmergencyRequest, Ambulance, Hospital } from '../../types';
@@ -11,10 +11,33 @@ interface EmergencyTrackingProps {
 export const EmergencyTracking: React.FC<EmergencyTrackingProps> = ({
   requestId,
 }) => {
+  const [otherHospitals, setOtherHospitals] = useState<any[]>([]);
   const [request, setRequest] = useState<EmergencyRequest | null>(null);
   const [assignedAmbulance, setAssignedAmbulance] = useState<Ambulance | null>(null);
   const [nearbyHospitals, setNearbyHospitals] = useState<Hospital[]>([]);
   const [loading, setLoading] = useState(true);
+  const [placesLoaded, setPlacesLoaded] = useState(false);
+
+  const [googlePage, setGooglePage] = useState(0);
+const GOOGLE_PER_PAGE = 2;
+
+const totalGooglePages = Math.ceil(otherHospitals.length / GOOGLE_PER_PAGE);
+
+const googleVisible = otherHospitals.slice(
+  googlePage * GOOGLE_PER_PAGE,
+  googlePage * GOOGLE_PER_PAGE + GOOGLE_PER_PAGE
+);
+
+// top of component
+const ITEMS_PER_PAGE = 2;
+const [page, setPage] = useState(0);
+
+const totalPages = Math.ceil(nearbyHospitals.length / ITEMS_PER_PAGE);
+
+const start = page * ITEMS_PER_PAGE;
+const currentHospitals = nearbyHospitals.slice(start, start + ITEMS_PER_PAGE);
+
+
   
 
   useEffect(() => {
@@ -32,19 +55,152 @@ export const EmergencyTracking: React.FC<EmergencyTrackingProps> = ({
   }, [requestId]);
 
   useEffect(() => {
-    // Fetch nearby hospitals
-    hospitalService.getAll().then((hospitals) => {
-      if (request) {
-        // Sort hospitals by distance (simplified - in production, use proper distance calculation)
-        const sorted = hospitals.sort((a, b) => {
-          const distA = Math.abs(a.location.lat - request.location.lat) + Math.abs(a.location.lng - request.location.lng);
-          const distB = Math.abs(b.location.lat - request.location.lat) + Math.abs(b.location.lng - request.location.lng);
-          return distA - distB;
-        });
-        setNearbyHospitals(sorted.slice(0, 5));
+  const load = async () => {
+    if (!request || !window.google) return;
+
+    const hospitals = await hospitalService.getAll();
+
+    const service = new google.maps.DistanceMatrixService();
+
+    service.getDistanceMatrix(
+      {
+        origins: [request.location],
+        destinations: hospitals.map((h) => h.location),
+        travelMode: google.maps.TravelMode.DRIVING,
+      },
+      (response, status) => {
+        if (status !== "OK" || !response) {
+          console.error("Distance Matrix failed:", status);
+          return;
+        }
+
+        const results = response.rows[0].elements.map((el, index) => ({
+          hospital: hospitals[index],
+          distanceText: el.distance.text,
+          distanceValue: el.distance.value,
+          durationText: el.duration.text,
+        }));
+
+        results.sort((a, b) => a.distanceValue - b.distanceValue);
+
+        setNearbyHospitals(
+          results.slice(0, 4).map((r) => ({
+            ...r.hospital,
+            distanceText: r.distanceText,
+            durationText: r.durationText,
+          }))
+        );
       }
-    });
-  }, [request]);
+    );
+  };
+
+  load();
+}, [request]);
+
+useEffect(() => {
+  if (!request || placesLoaded) return;
+
+  // 🔴 CRITICAL: wait until places library is ready
+  if (
+    !window.google ||
+    !google.maps ||
+    !google.maps.places
+  ) {
+    console.log("Places library not ready yet");
+    return;
+  }
+
+  console.log("Searching nearby hospitals from Google...");
+
+  const placesService = new google.maps.places.PlacesService(
+    document.createElement("div")
+  );
+
+  placesService.nearbySearch(
+    {
+      location: new google.maps.LatLng(
+        request.location.lat,
+        request.location.lng
+      ),
+      radius: 5000,
+      type: "hospital",
+    },
+    (results, status) => {
+      if (
+        status !== google.maps.places.PlacesServiceStatus.OK ||
+        !results ||
+        results.length === 0
+      ) {
+        console.log("Places failed:", status);
+        setOtherHospitals([]);
+        return;
+      }
+
+      const valid = results.filter((r) => r.geometry?.location);
+
+      if (!valid.length) {
+        setOtherHospitals([]);
+        return;
+      }
+
+      const matrix = new google.maps.DistanceMatrixService();
+
+      matrix.getDistanceMatrix(
+        {
+          origins: [
+            new google.maps.LatLng(
+              request.location.lat,
+              request.location.lng
+            ),
+          ],
+          destinations: valid.map((r) => r.geometry!.location!),
+          travelMode: google.maps.TravelMode.DRIVING,
+        },
+        (res, matrixStatus) => {
+          if (
+            matrixStatus !== "OK" ||
+            !res?.rows?.length
+          ) {
+            console.log("Matrix failed:", matrixStatus);
+            return;
+          }
+
+          const enriched = valid.map((place, i) => {
+            const el = res.rows[0].elements[i];
+
+            return {
+              ...place,
+              distanceText: el?.distance?.text,
+              durationText: el?.duration?.text,
+              durationValue: el?.duration?.value,
+            };
+          });
+
+          enriched.sort(
+            (a, b) =>
+              (a.durationValue ?? Infinity) -
+              (b.durationValue ?? Infinity)
+          );
+
+          console.log("Final enriched hospitals:", enriched);
+
+          setOtherHospitals(enriched.slice(0, 6));
+          setPlacesLoaded(true);
+        }
+      );
+    }
+  );
+}, [request]);
+
+useEffect(() => {
+  setGooglePage(0);
+}, [otherHospitals]);
+
+
+
+
+
+
 
   const getStatusColor = (status: EmergencyRequest['status']) => {
     switch (status) {
@@ -85,6 +241,24 @@ export const EmergencyTracking: React.FC<EmergencyTrackingProps> = ({
         </div>
       </div>
     );
+  }
+
+  const handleNavigate = (hospital: Hospital) => {
+    if (!request) return;
+
+    const origin = `${request.location.lat},${request.location.lng}`;
+    const destination = `${hospital.location.lat},${hospital.location.lng}`;
+
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&travelmode=driving`;
+
+    window.open(url, "_blank");
+  };
+
+
+
+  const hospitalPages = [];
+  for (let i = 0; i < nearbyHospitals.length; i += ITEMS_PER_PAGE) {
+    hospitalPages.push(nearbyHospitals.slice(i, i + ITEMS_PER_PAGE));
   }
 
   return (
@@ -207,40 +381,216 @@ export const EmergencyTracking: React.FC<EmergencyTrackingProps> = ({
           )}
         </div>
 
-        {/* Nearby Hospitals */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">Nearby Hospitals</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {nearbyHospitals.map((hospital) => (
-              <div key={hospital.id} className="border border-gray-200 rounded-lg p-4">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="font-medium text-gray-800">{hospital.name}</h3>
-                    <p className="text-sm text-gray-600 mt-1">{hospital.address}</p>
-                    <p className="text-sm text-gray-600">{hospital.phone}</p>
-                  </div>
-                  <Building2 className="h-5 w-5 text-gray-400" />
+        
+
+        {/* Hospitals */}
+<div className="bg-white rounded-lg shadow-sm p-6">
+  <h2 className="text-lg font-semibold text-gray-800 mb-4">
+    Nearby Hospitals
+  </h2>
+
+  {/* Cards */}
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    {[...currentHospitals, ...Array(ITEMS_PER_PAGE - currentHospitals.length)].map(
+      (hospital, i) =>
+        hospital ? (
+          <div
+            key={hospital.id}
+            className="border border-gray-200 rounded-lg p-4"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="font-medium text-gray-800">
+                  {hospital.name}
+                </h3>
+
+                <p className="text-sm text-gray-600 mt-1 line-clamp-2">
+                  {hospital.address}
+                </p>
+
+                <div className="mt-1">
+                  <Phone className="h-4 w-4 inline mr-2" />
+                  <span className="text-sm text-gray-600">
+                    {hospital.phone}
+                  </span>
                 </div>
-                <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                  <div className="text-center p-2 bg-red-50 rounded">
-                    <div className="font-medium text-red-800">{hospital.beds.icu}</div>
-                    <div className="text-red-600">ICU</div>
-                  </div>
-                  <div className="text-center p-2 bg-blue-50 rounded">
-                    <div className="font-medium text-blue-800">{hospital.beds.oxygen}</div>
-                    <div className="text-blue-600">Oxygen</div>
-                  </div>
-                  <div className="text-center p-2 bg-green-50 rounded">
-                    <div className="font-medium text-green-800">{hospital.beds.general}</div>
-                    <div className="text-green-600">General</div>
-                  </div>
-                </div>
+
+                {hospital.distanceText && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    🚗 {hospital.distanceText} • {hospital.durationText}
+                  </p>
+                )}
               </div>
-            ))}
+
+              <button
+                onClick={() => handleNavigate(hospital)}
+                className="p-2 text-gray-400 hover:text-blue-600 transition"
+              >
+                <Navigation className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+              <div className="text-center p-2 bg-red-50 rounded">
+                <div className="font-medium text-red-800">
+                  {hospital.beds.icu}
+                </div>
+                <div className="text-red-600">ICU</div>
+              </div>
+
+              <div className="text-center p-2 bg-blue-50 rounded">
+                <div className="font-medium text-blue-800">
+                  {hospital.beds.oxygen}
+                </div>
+                <div className="text-blue-600">Oxygen</div>
+              </div>
+
+              <div className="text-center p-2 bg-green-50 rounded">
+                <div className="font-medium text-green-800">
+                  {hospital.beds.general}
+                </div>
+                <div className="text-green-600">General</div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div
+            key={`empty-${i}`}
+            className="border border-transparent rounded-lg p-4"
+          />
+        )
+    )}
+  </div>
+
+  {/* Pagination Arrows */}
+{totalPages > 1 && (
+  <div className="flex justify-center items-center gap-3 mt-6">
+    <button
+      disabled={page === 0}
+      onClick={() => setPage((p) => p - 1)}
+      className="px-3 py-1 bg-gray-200 rounded disabled:opacity-50"
+    >
+      Prev
+    </button>
+
+    <span className="text-sm text-gray-600">
+      Page {page + 1} / {totalPages}
+    </span>
+
+    <button
+      disabled={page === totalPages - 1}
+      onClick={() => setPage((p) => p + 1)}
+      className="px-3 py-1 bg-gray-200 rounded disabled:opacity-50"
+    >
+      Next
+    </button>
+  </div>
+)}
+
+</div>
+
+
+             {/* other nearby Hospitals */}
+  {/* ================= Other Nearby Hospitals (Google) ================= */}
+<div className="bg-white rounded-lg shadow-sm p-6">
+  <h2 className="text-lg font-semibold text-gray-800 mb-4">
+    Other Nearby Hospitals
+  </h2>
+
+  {!otherHospitals.length && (
+    <div className="text-gray-500 text-center py-4">
+      Searching hospitals from Google...
+    </div>
+  )}
+
+  {/* GRID = ONLY CARDS */}
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    {googleVisible.map((place) => {
+      const lat = place.geometry?.location?.lat();
+      const lng = place.geometry?.location?.lng();
+      if (!lat || !lng) return null;
+
+      return (
+        <div
+          key={place.place_id}
+          className="border border-gray-200 rounded-lg p-4"
+        >
+          <div className="flex items-start justify-between">
+            <div>
+              <h3 className="font-medium text-gray-800">
+                {place.name}
+              </h3>
+
+              <p className="text-sm text-gray-600 mt-1 line-clamp-2">
+                {place.vicinity}
+              </p>
+
+              {(place.distanceText || place.rating) && (
+                <p className="text-xs text-gray-500 mt-1">
+                  {place.distanceText && (
+                    <>🚗 {place.distanceText} • {place.durationText}</>
+                  )}
+
+                  {place.distanceText && place.rating && " • "}
+
+                  {place.rating && <>⭐ {place.rating}</>}
+                </p>
+              )}
+
+            </div>
+
+            <button
+              onClick={() => {
+                const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+                window.open(url, "_blank");
+              }}
+              className="p-2 text-gray-400 hover:text-blue-600 transition"
+            >
+              <Navigation className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="mt-3 text-xs bg-gray-100 p-2 rounded">
+            Bed availability not shared
           </div>
         </div>
+      );
+    })}
+  </div>
+
+  {/* PAGINATION = OUTSIDE GRID */}
+  {totalGooglePages > 1 && (
+    <div className="flex justify-center items-center gap-3 mt-6">
+      <button
+        disabled={googlePage === 0}
+        onClick={() => setGooglePage((p) => p - 1)}
+        className="px-3 py-1 bg-gray-200 rounded disabled:opacity-50"
+      >
+        Prev
+      </button>
+
+      <span className="text-sm text-gray-600">
+        Page {googlePage + 1} / {totalGooglePages}
+      </span>
+
+      <button
+        disabled={googlePage === totalGooglePages - 1}
+        onClick={() => setGooglePage((p) => p + 1)}
+        className="px-3 py-1 bg-gray-200 rounded disabled:opacity-50"
+      >
+        Next
+      </button>
+    </div>
+  )}
+</div>
+
+
+
+
       </div>
     </div>
   );
 };
+
+
 

@@ -25,7 +25,7 @@ export const ConfirmEmergency: React.FC = () => {
       }
 
       try {
-        const response = await fetch(`http://localhost:3000/token/${token}`);
+        const response = await fetch(`/token/${token}`);
         if (!response.ok) {
           throw new Error('Invalid token');
         }
