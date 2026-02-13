@@ -5,18 +5,20 @@ import { useGoogleMaps } from '../../hooks/useGoogleMaps';
 interface GoogleMapProps {
   center: Location;
   zoom?: number;
+  patientLocation?: Location;
 
   ambulances?: Ambulance[];
-  hospitals?: Hospital[]; // Firebase hospitals (optional)
-
-  googleHospitals?: google.maps.places.PlaceResult[]; // 🔴 NEW
+  hospitals?: Hospital[];
+  googleHospitals?: google.maps.places.PlaceResult[];
   userLocation?: Location;
 
   selectedAmbulance?: Ambulance;
   onAmbulanceSelect?: (ambulance: Ambulance) => void;
 
   showRoute?: boolean;
-  onMapLoad?: (map: google.maps.Map) => void; // 🔴 NEW
+  destination?: Location;
+
+  onMapLoad?: (map: google.maps.Map) => void;
   className?: string;
 }
 
@@ -27,146 +29,192 @@ export const GoogleMap: React.FC<GoogleMapProps> = ({
   hospitals = [],
   googleHospitals = [],
   userLocation,
-  selectedAmbulance,
+  patientLocation,
   onAmbulanceSelect,
   showRoute = false,
+  destination,
   onMapLoad,
   className = '',
 }) => {
   const mapRef = useRef<HTMLDivElement>(null);
+  const markersRef = useRef<google.maps.Marker[]>([]);
+
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const [directionsRenderer, setDirectionsRenderer] =
     useState<google.maps.DirectionsRenderer | null>(null);
 
   const { isLoaded, loadError } = useGoogleMaps();
 
-  // Initialize map
+  /* ================================================= */
+  /* INIT MAP                                          */
+  /* ================================================= */
   useEffect(() => {
-    if (isLoaded && mapRef.current && !map) {
-      const googleMap = new google.maps.Map(mapRef.current, {
-        center: { lat: center.lat, lng: center.lng },
-        zoom,
-      });
+    if (!isLoaded || !mapRef.current || map) return;
 
-      const renderer = new google.maps.DirectionsRenderer({
-        suppressMarkers: false,
-        polylineOptions: {
-          strokeColor: '#ef4444',
-          strokeWeight: 4,
-        },
-      });
+    const googleMap = new google.maps.Map(mapRef.current, {
+      center,
+      zoom,
+    });
 
-      renderer.setMap(googleMap);
-
-      setMap(googleMap);
-      setDirectionsRenderer(renderer);
-
-      if (onMapLoad) onMapLoad(googleMap);
-    }
-  }, [isLoaded, map, center, zoom, onMapLoad]);
-
-  // Update center
-  useEffect(() => {
-    if (map) {
-      map.setCenter({ lat: center.lat, lng: center.lng });
-    }
-  }, [map, center]);
-
-  // User location marker
-  useEffect(() => {
-    if (!map || !userLocation) return;
-
-    new google.maps.Marker({
-      position: userLocation,
-      map,
-      title: 'User Location',
-      icon: {
-        url: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png',
+    const renderer = new google.maps.DirectionsRenderer({
+      suppressMarkers: true, // ✅ WE DRAW OUR OWN
+      polylineOptions: {
+        strokeColor: '#ef4444',
+        strokeWeight: 5,
       },
     });
-  }, [map, userLocation]);
 
-  // Ambulance markers
+    renderer.setMap(googleMap);
+
+    setMap(googleMap);
+    setDirectionsRenderer(renderer);
+
+    onMapLoad?.(googleMap);
+  }, [isLoaded, map]);
+
+  /* ================================================= */
+  /* UPDATE CENTER                                     */
+  /* ================================================= */
+  useEffect(() => {
+    if (map) map.setCenter(center);
+  }, [center, map]);
+
+  /* ================================================= */
+  /* CLEAR MARKERS                                     */
+  /* ================================================= */
+  const clearMarkers = () => {
+    markersRef.current.forEach((m) => m.setMap(null));
+    markersRef.current = [];
+  };
+
+  /* ================================================= */
+  /* DRAW MARKERS                                      */
+  /* ================================================= */
   useEffect(() => {
     if (!map) return;
 
+    clearMarkers();
+
+    /* ========== DRIVER / AMBULANCE SELF ========== */
+    if (userLocation) {
+      const marker = new google.maps.Marker({
+        position: userLocation,
+        map,
+        title: 'Your Ambulance',
+        icon: {
+          url: '/markers/ambulance.png',
+          scaledSize: new google.maps.Size(40, 40),
+        },
+        zIndex: 1000,
+      });
+
+      markersRef.current.push(marker);
+    }
+
+    /* ========== PATIENT ========== */
+    if (patientLocation) {
+      const marker = new google.maps.Marker({
+        position: patientLocation,
+        map,
+        title: 'Patient',
+        icon: {
+          url: '/markers/patient.png',
+          scaledSize: new google.maps.Size(40, 40),
+        },
+        zIndex: 1001,
+      });
+
+      markersRef.current.push(marker);
+    }
+
+    /* ========== OTHER AMBULANCES (if any) ========== */
     ambulances.forEach((ambulance) => {
       const marker = new google.maps.Marker({
         position: ambulance.location,
         map,
         title: `Ambulance ${ambulance.vehicleNumber}`,
         icon: {
-          url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
+          url: '/markers/ambulance.png',
+          scaledSize: new google.maps.Size(35, 35),
         },
       });
 
       marker.addListener('click', () => {
         onAmbulanceSelect?.(ambulance);
       });
+
+      markersRef.current.push(marker);
     });
-  }, [map, ambulances, onAmbulanceSelect]);
 
-  // Firebase hospitals (optional / registered)
-  useEffect(() => {
-    if (!map) return;
-
+    /* ========== FIREBASE HOSPITALS ========== */
     hospitals.forEach((hospital) => {
-      new google.maps.Marker({
+      const marker = new google.maps.Marker({
         position: hospital.location,
         map,
         title: hospital.name,
         icon: {
-          url: 'http://maps.google.com/mapfiles/ms/icons/green-dot.png',
+          url: '/markers/hospital.png',
+          scaledSize: new google.maps.Size(35, 35),
         },
       });
+
+      markersRef.current.push(marker);
     });
-  }, [map, hospitals]);
 
-  // 🔴 LIVE GOOGLE HOSPITALS
-  useEffect(() => {
-    if (!map) return;
-
+    /* ========== GOOGLE HOSPITALS ========== */
     googleHospitals.forEach((hospital) => {
       if (!hospital.geometry?.location) return;
 
-      new google.maps.Marker({
+      const marker = new google.maps.Marker({
         position: hospital.geometry.location,
         map,
         title: hospital.name,
-        icon: {
-          url: 'http://maps.google.com/mapfiles/ms/icons/hospitals.png',
-        },
       });
-    });
-  }, [map, googleHospitals]);
 
-  // Route rendering
+      markersRef.current.push(marker);
+    });
+  }, [
+    map,
+    userLocation,
+    patientLocation, // ✅ important
+    ambulances,
+    hospitals,
+    googleHospitals,
+  ]);
+
+  /* ================================================= */
+  /* ROUTING                                            */
+  /* ================================================= */
   useEffect(() => {
-    if (
-      !map ||
-      !directionsRenderer ||
-      !showRoute ||
-      !selectedAmbulance ||
-      !userLocation
-    )
+    if (!map || !directionsRenderer) return;
+
+    if (!showRoute || !userLocation || !destination) {
+      directionsRenderer.setDirections({ routes: [] } as any);
       return;
+    }
 
     const service = new google.maps.DirectionsService();
 
     service.route(
       {
-        origin: selectedAmbulance.location,
-        destination: userLocation,
+        origin: userLocation,
+        destination,
         travelMode: google.maps.TravelMode.DRIVING,
       },
       (result, status) => {
         if (status === 'OK' && result) {
           directionsRenderer.setDirections(result);
+
+          const bounds = new google.maps.LatLngBounds();
+          bounds.extend(userLocation);
+          bounds.extend(destination);
+          map.fitBounds(bounds);
         }
       }
     );
-  }, [map, directionsRenderer, showRoute, selectedAmbulance, userLocation]);
+  }, [map, directionsRenderer, showRoute, userLocation, destination]);
 
+  /* ================================================= */
   if (loadError) {
     return (
       <div className={`flex items-center justify-center ${className}`}>

@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { MapPin, Clock, Phone, Navigation, CheckCircle, XCircle, Truck, Activity, User, AlertTriangle, Bell } from 'lucide-react';
 import { GoogleMap } from '../Map/GoogleMap';
 import { useGeolocation } from '../../hooks/useGeolocation';
-import { ambulanceService, emergencyService } from '../../services/firebaseService';
-import { Ambulance, EmergencyRequest } from '../../types';
+import { ambulanceService, emergencyService, hospitalService } from '../../services/firebaseService';
+import { Ambulance, EmergencyRequest, Hospital } from '../../types';
 
 interface DriverDashboardProps {
   ambulanceId?: string;
+  
 }
 
 export const DriverDashboard: React.FC<DriverDashboardProps> = ({
@@ -18,6 +19,8 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
   const [pendingRequests, setPendingRequests] = useState<EmergencyRequest[]>([]);
   const [showNotification, setShowNotification] = useState(false);
   const { location } = useGeolocation(true);
+  const [nearbyHospitals, setNearbyHospitals] = useState<Hospital[]>([]);
+
 
   useEffect(() => {
     // Fetch ambulance details
@@ -28,6 +31,11 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
       }
     });
   }, [ambulanceId]);
+
+  useEffect(() => {
+  hospitalService.getAll().then(setNearbyHospitals);
+}, []);
+
 
   useEffect(() => {
     // Subscribe to ambulance updates
@@ -80,6 +88,34 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
 
     return unsubscribe;
   }, [isOnline, currentRequest]);
+
+  /* ============================================= */
+/* AUTO ASSIGN NEAREST WHEN DRIVER FREE         */
+/* ============================================= */
+useEffect(() => {
+  if (!isOnline) return;
+  if (!ambulanceId) return;
+  if (!location) return;
+  if (currentRequest) return;
+  if (!pendingRequests.length) return;
+
+  console.log("Auto assignment check...");
+
+  // pick nearest request
+  const nearest = [...pendingRequests].sort((a, b) => {
+    const da = emergencyService.calculateDistance(location, a.location);
+    const db = emergencyService.calculateDistance(location, b.location);
+    return da - db;
+  })[0];
+
+  if (!nearest) return;
+
+  console.log("Auto accepting:", nearest.id);
+
+  handleAcceptRequest(nearest.id);
+
+}, [isOnline, pendingRequests, location, currentRequest, ambulanceId]);
+
 
   useEffect(() => {
     // Update ambulance location when driver's location changes
@@ -450,16 +486,33 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
         )}
 
         {/* Map */}
-        {location && (
-          <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-            <GoogleMap
-              center={location}
-              userLocation={location}
-              ambulances={[ambulance]}
-              className="h-96 w-full"
-            />
-          </div>
-        )}
+        {/* Map */}
+{location && (
+  <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+    <GoogleMap
+  center={location}
+
+  // ambulance
+  userLocation={location}
+
+  // patient
+  patientLocation={currentRequest?.location}
+
+  // hospitals
+  hospitals={nearbyHospitals}
+
+  ambulances={[]}
+
+  destination={currentRequest?.location}
+  showRoute={!!currentRequest}
+
+  className="h-96 w-full"
+/>
+
+
+  </div>
+)}
+
       </div>
     </div>
   );

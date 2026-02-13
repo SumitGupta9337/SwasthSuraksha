@@ -84,7 +84,7 @@ const currentHospitals = nearbyHospitals.slice(start, start + ITEMS_PER_PAGE);
         results.sort((a, b) => a.distanceValue - b.distanceValue);
 
         setNearbyHospitals(
-          results.slice(0, 4).map((r) => ({
+          results.map((r) => ({
             ...r.hospital,
             distanceText: r.distanceText,
             durationText: r.durationText,
@@ -260,6 +260,8 @@ useEffect(() => {
   for (let i = 0; i < nearbyHospitals.length; i += ITEMS_PER_PAGE) {
     hospitalPages.push(nearbyHospitals.slice(i, i + ITEMS_PER_PAGE));
   }
+console.log("Assigned ambulance object:", assignedAmbulance);
+console.log("Ambulance location:", assignedAmbulance?.location);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -279,14 +281,15 @@ useEffect(() => {
         {/* Map */}
         <div className="bg-white rounded-lg shadow-sm overflow-hidden">
           <GoogleMap
-            center={request.location}
-            userLocation={request.location}
-            ambulances={assignedAmbulance ? [assignedAmbulance] : []}
-            hospitals={nearbyHospitals}
-            selectedAmbulance={assignedAmbulance || undefined}
-            showRoute={!!assignedAmbulance}
-            className="h-96 w-full"
-          />
+  center={request.location}
+  patientLocation={request.location}
+  ambulances={assignedAmbulance ? [assignedAmbulance] : []}
+  destination={request.location}
+  showRoute={!!assignedAmbulance}
+  hospitals={nearbyHospitals}
+  className="h-96 w-full"
+/>
+
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -386,7 +389,7 @@ useEffect(() => {
         {/* Hospitals */}
 <div className="bg-white rounded-lg shadow-sm p-6">
   <h2 className="text-lg font-semibold text-gray-800 mb-4">
-    Nearby Hospitals
+    Registered Nearby Hospitals
   </h2>
 
   {/* Cards */}
