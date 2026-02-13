@@ -17,6 +17,9 @@ export const EmergencyTracking: React.FC<EmergencyTrackingProps> = ({
   const [nearbyHospitals, setNearbyHospitals] = useState<Hospital[]>([]);
   const [loading, setLoading] = useState(true);
   const [placesLoaded, setPlacesLoaded] = useState(false);
+  const [etaText, setEtaText] = useState<string>();
+  const [etaClock, setEtaClock] = useState<string>();
+
 
   const [googlePage, setGooglePage] = useState(0);
 const GOOGLE_PER_PAGE = 2;
@@ -96,6 +99,60 @@ const currentHospitals = nearbyHospitals.slice(start, start + ITEMS_PER_PAGE);
 
   load();
 }, [request]);
+
+useEffect(() => {
+  if (!assignedAmbulance || !request || !window.google) return;
+
+  const calculate = () => {
+    const service = new google.maps.DistanceMatrixService();
+
+    service.getDistanceMatrix(
+      {
+        origins: [
+          new google.maps.LatLng(
+            assignedAmbulance.location.lat,
+            assignedAmbulance.location.lng
+          ),
+        ],
+        destinations: [
+          new google.maps.LatLng(
+            request.location.lat,
+            request.location.lng
+          ),
+        ],
+        travelMode: google.maps.TravelMode.DRIVING,
+      },
+      (response, status) => {
+        if (status !== "OK" || !response?.rows?.length) return;
+
+        const element = response.rows[0].elements[0];
+
+        // minutes text (14 mins)
+        setEtaText(element.duration.text);
+
+        // arrival clock
+        const arrival = new Date(
+          Date.now() + element.duration.value * 1000
+        );
+
+        setEtaClock(
+          arrival.toLocaleTimeString("en-IN", {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          })
+        );
+      }
+    );
+  };
+
+  calculate(); // first time
+
+  const id = setInterval(calculate, 10000); // refresh every 10 sec
+
+  return () => clearInterval(id);
+}, [assignedAmbulance, request]);
+
 
 useEffect(() => {
   if (!request || placesLoaded) return;
@@ -282,13 +339,22 @@ console.log("Ambulance location:", assignedAmbulance?.location);
         <div className="bg-white rounded-lg shadow-sm overflow-hidden">
           <GoogleMap
   center={request.location}
+
+  // patient
   patientLocation={request.location}
+
+  // ambulance = origin
+  userLocation={assignedAmbulance?.location}
+
   ambulances={assignedAmbulance ? [assignedAmbulance] : []}
+
   destination={request.location}
   showRoute={!!assignedAmbulance}
+
   hospitals={nearbyHospitals}
   className="h-96 w-full"
 />
+
 
         </div>
 
@@ -361,16 +427,17 @@ console.log("Ambulance location:", assignedAmbulance?.location);
                     {assignedAmbulance.status.replace('_', ' ').toUpperCase()}
                   </span>
                 </div>
-                {request.estimatedArrival && (
+                {etaText && etaClock && (
                   <div className="mt-4 p-3 bg-blue-50 rounded-lg">
                     <div className="flex items-center">
                       <Clock className="h-4 w-4 text-blue-600 mr-2" />
                       <span className="text-sm font-medium text-blue-800">
-                        ETA: {request.estimatedArrival.toLocaleTimeString()}
+                        Arrives at {etaClock} ({etaText})
                       </span>
                     </div>
                   </div>
                 )}
+
               </div>
             </div>
           ) : (
