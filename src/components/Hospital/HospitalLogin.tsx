@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, User, Key, MapPin, Phone } from 'lucide-react';
+import { Building2, User, Key, MapPin, Phone, Navigation } from 'lucide-react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
@@ -12,7 +12,9 @@ export const HospitalLogin: React.FC = () => {
   const [hospitalName, setHospitalName] = useState('');
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
+  const [location, setLocation] = useState<{lat: number; lng: number; address: string} | null>(null);
   const [loading, setLoading] = useState(false);
+  const [gettingLocation, setGettingLocation] = useState(false);
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -34,16 +36,26 @@ export const HospitalLogin: React.FC = () => {
         }
       } else {
         // Register new hospital
+        if (!location) {
+          alert('Please get your location first');
+          setLoading(false);
+          return;
+        }
+
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const hospitalId = userCredential.user.uid;
 
-        // Create hospital profile with default location (you can enhance this with geocoding)
+        // Create hospital profile with location data
         await setDoc(doc(db, 'hospitals', hospitalId), {
           name: hospitalName,
           email,
           address,
           phone,
-          location: { lat: 28.6139, lng: 77.2090 }, // Default to Delhi, can be updated later
+          location: {
+            lat: location.lat,
+            lng: location.lng,
+            address: location.address
+          },
           beds: {
             icu: 0,
             oxygen: 0,
@@ -61,6 +73,55 @@ export const HospitalLogin: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const getCurrentLocation = () => {
+    setGettingLocation(true);
+    
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser');
+      setGettingLocation(false);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        
+        // Get address from coordinates using reverse geocoding
+        try {
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
+          );
+          const data = await response.json();
+          
+          setLocation({
+            lat: latitude,
+            lng: longitude,
+            address: data.display_name || 'Location detected'
+          });
+          
+          // Also set the address field if it's empty
+          if (!address) {
+            setAddress(data.display_name || '');
+          }
+        } catch (error) {
+          console.error('Error getting address:', error);
+          setLocation({
+            lat: latitude,
+            lng: longitude,
+            address: `${latitude}, ${longitude}`
+          });
+        }
+        
+        setGettingLocation(false);
+      },
+      (error) => {
+        console.error('Error getting location:', error);
+        alert('Unable to get your location. Please try again or enter address manually.');
+        setGettingLocation(false);
+      }
+    );
   };
 
   return (
@@ -125,7 +186,7 @@ export const HospitalLogin: React.FC = () => {
                 <textarea
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  rows={3}
+                  rows={2}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                   required
                 />
@@ -144,12 +205,49 @@ export const HospitalLogin: React.FC = () => {
                   required
                 />
               </div>
+
+              <div className="border-t border-gray-200 pt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Hospital Location
+                </label>
+                
+                <button
+                  type="button"
+                  onClick={getCurrentLocation}
+                  disabled={gettingLocation}
+                  className="w-full mb-3 flex items-center justify-center px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition-colors"
+                >
+                  <Navigation className="h-5 w-5 mr-2" />
+                  {gettingLocation ? 'Getting Location...' : 'Get Current Location'}
+                </button>
+
+                {location && (
+                  <div className="mt-3 p-4 bg-green-50 border border-green-200 rounded-lg">
+                    <div className="flex items-start">
+                      <MapPin className="h-5 w-5 text-green-600 mr-2 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium text-green-800">Location Detected</p>
+                        <p className="text-sm text-green-700 mt-1">{location.address}</p>
+                        <p className="text-xs text-green-600 mt-1">
+                          Lat: {location.lat.toFixed(6)}, Lng: {location.lng.toFixed(6)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {!location && (
+                  <p className="text-xs text-gray-500 mt-2">
+                    Click the button above to automatically detect your hospital's location
+                  </p>
+                )}
+              </div>
             </>
           )}
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || (!isLogin && !location)}
             className="w-full bg-green-600 text-white py-3 px-4 rounded-lg font-semibold hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
           >
             {loading ? (
@@ -174,7 +272,7 @@ export const HospitalLogin: React.FC = () => {
 
         <div className="mt-6 pt-6 border-t border-gray-200">
           <div className="flex items-center justify-center text-sm text-gray-500">
-            <Building2 className="h-4 w-4 mr-2" />
+            <MapPin className="h-4 w-4 mr-2" />
             SwasthSuraksha Hospital Portal
           </div>
         </div>

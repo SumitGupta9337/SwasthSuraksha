@@ -7,7 +7,6 @@ import { Ambulance, EmergencyRequest, Hospital } from '../../types';
 
 interface DriverDashboardProps {
   ambulanceId?: string;
-  
 }
 
 export const DriverDashboard: React.FC<DriverDashboardProps> = ({
@@ -20,22 +19,30 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
   const [showNotification, setShowNotification] = useState(false);
   const { location } = useGeolocation(true);
   const [nearbyHospitals, setNearbyHospitals] = useState<Hospital[]>([]);
-
+  const [isAssigning, setIsAssigning] = useState(false);
+  const [acceptedRequestIds, setAcceptedRequestIds] = useState<Set<string>>(new Set());
+  const [assignmentInProgress, setAssignmentInProgress] = useState(false);
 
   useEffect(() => {
     // Fetch ambulance details
-    ambulanceService.getById(ambulanceId).then((amb) => {
-      if (amb) {
-        setAmbulance(amb);
-        setIsOnline(amb.status === 'available' || amb.status === 'on_trip');
+    const fetchAmbulance = async () => {
+      try {
+        const amb = await ambulanceService.getById(ambulanceId);
+        if (amb) {
+          console.log("Ambulance loaded:", amb);
+          setAmbulance(amb);
+          setIsOnline(amb.status === 'available' || amb.status === 'on_trip');
+        }
+      } catch (error) {
+        console.error("Error fetching ambulance:", error);
       }
-    });
+    };
+    fetchAmbulance();
   }, [ambulanceId]);
 
   useEffect(() => {
-  hospitalService.getAll().then(setNearbyHospitals);
-}, []);
-
+    hospitalService.getAll().then(setNearbyHospitals);
+  }, []);
 
   useEffect(() => {
     // Subscribe to ambulance updates
@@ -43,6 +50,7 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
 
     const unsubscribe = ambulanceService.subscribeToAmbulance(ambulanceId, (updatedAmbulance) => {
       if (updatedAmbulance) {
+        console.log("Ambulance updated:", updatedAmbulance);
         setAmbulance(updatedAmbulance);
         setIsOnline(updatedAmbulance.status === 'available' || updatedAmbulance.status === 'on_trip');
       }
@@ -56,8 +64,22 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
     if (!ambulanceId) return;
 
     const unsubscribe = emergencyService.subscribeToAmbulanceRequests(ambulanceId, (requests) => {
+      console.log("Ambulance requests received:", requests);
+      
       if (requests.length > 0) {
-        setCurrentRequest(requests[0]);
+        // Check if the request is still valid (not completed or cancelled)
+        const activeRequest = requests.find(r => 
+          r.status === 'assigned' || r.status === 'en_route'
+        );
+        
+        if (activeRequest) {
+          console.log("Active request found:", activeRequest);
+          setCurrentRequest(activeRequest);
+          // Clear any pending requests when we have an active request
+          setPendingRequests([]);
+        } else {
+          setCurrentRequest(null);
+        }
       } else {
         setCurrentRequest(null);
       }
@@ -67,8 +89,8 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
   }, [ambulanceId]);
 
   useEffect(() => {
-    // Subscribe to pending requests when online
-    if (!isOnline) {
+    // Subscribe to pending requests when online and no current request
+    if (!isOnline || currentRequest) {
       setPendingRequests([]);
       return;
     }
@@ -77,45 +99,82 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
 
     const unsubscribe = emergencyService.subscribeToPendingRequests((requests) => {
       console.log('Received pending requests:', requests);
-      setPendingRequests(requests);
+      
+      // Filter out requests that are already assigned or have been accepted by others
+      const validRequests = requests.filter(req => 
+        req.status === 'pending' && 
+        !acceptedRequestIds.has(req.id) &&
+        !assignmentInProgress
+      );
+      
+      setPendingRequests(validRequests);
       
       // Show notification for new requests
-      if (requests.length > 0 && !currentRequest) {
+      if (validRequests.length > 0 && !currentRequest) {
         setShowNotification(true);
         setTimeout(() => setShowNotification(false), 5000);
       }
     });
 
     return unsubscribe;
-  }, [isOnline, currentRequest]);
+  }, [isOnline, currentRequest, acceptedRequestIds, assignmentInProgress]);
 
   /* ============================================= */
-/* AUTO ASSIGN NEAREST WHEN DRIVER FREE         */
-/* ============================================= */
-useEffect(() => {
-  if (!isOnline) return;
-  if (!ambulanceId) return;
-  if (!location) return;
-  if (currentRequest) return;
-  if (!pendingRequests.length) return;
+  /* AUTO ASSIGN NEAREST WHEN DRIVER FREE         */
+  /* ============================================= */
+  useEffect(() => {
+    const autoAssignNearest = async () => {
+      // Don't run if conditions aren't met
+      if (!isOnline) return;
+      if (!ambulanceId) return;
+      if (!location) return;
+      if (currentRequest) return;
+      if (pendingRequests.length === 0) return;
+      if (assignmentInProgress) return; // Prevent multiple simultaneous assignments
 
-  console.log("Auto assignment check...");
+      console.log("Auto assignment check...");
 
-  // pick nearest request
-  const nearest = [...pendingRequests].sort((a, b) => {
-    const da = emergencyService.calculateDistance(location, a.location);
-    const db = emergencyService.calculateDistance(location, b.location);
-    return da - db;
-  })[0];
+      // Check if ambulance is actually available
+      const currentAmbulance = await ambulanceService.getById(ambulanceId);
+      if (!currentAmbulance || currentAmbulance.status !== 'available') {
+        console.log("Ambulance not available for auto assignment");
+        return;
+      }
 
-  if (!nearest) return;
+      // Sort by distance
+      const nearest = [...pendingRequests].sort((a, b) => {
+        const da = emergencyService.calculateDistance(location, a.location);
+        const db = emergencyService.calculateDistance(location, b.location);
+        return da - db;
+      })[0];
 
-  console.log("Auto accepting:", nearest.id);
+      if (!nearest) return;
 
-  handleAcceptRequest(nearest.id);
+      // Check if this request is still pending
+      try {
+        setAssignmentInProgress(true);
+        
+        // Double-check the request status from Firebase
+        const currentRequestData = await emergencyService.getById(nearest.id);
+        
+        if (currentRequestData && currentRequestData.status === 'pending') {
+          console.log("Auto accepting nearest request:", nearest.id);
+          await handleAcceptRequest(nearest.id);
+        } else {
+          console.log("Request already taken by another driver:", nearest.id);
+          // Remove from pending list
+          setPendingRequests(prev => prev.filter(req => req.id !== nearest.id));
+          setAcceptedRequestIds(prev => new Set([...prev, nearest.id]));
+        }
+      } catch (error) {
+        console.error("Error in auto assignment:", error);
+      } finally {
+        setAssignmentInProgress(false);
+      }
+    };
 
-}, [isOnline, pendingRequests, location, currentRequest, ambulanceId]);
-
+    autoAssignNearest();
+  }, [isOnline, pendingRequests, location, currentRequest, ambulanceId, assignmentInProgress]);
 
   useEffect(() => {
     // Update ambulance location when driver's location changes
@@ -136,41 +195,94 @@ useEffect(() => {
     } else {
       console.log('Going offline - will stop receiving requests');
       setPendingRequests([]);
+      setAcceptedRequestIds(new Set());
     }
   };
 
   const handleAcceptRequest = async (requestId: string) => {
     console.log('Accepting request:', requestId);
     
-    await emergencyService.updateRequest(requestId, {
-      status: 'assigned',
-      assignedAmbulanceId: ambulanceId,
-    });
+    if (assignmentInProgress) return;
     
-    await ambulanceService.updateStatus(ambulanceId, 'on_trip');
-    
-    // Clear pending requests
-    setPendingRequests([]);
-    setShowNotification(false);
+    try {
+      setAssignmentInProgress(true);
+      setIsAssigning(true);
+      
+      // Check if ambulance is still available
+      const currentAmbulance = await ambulanceService.getById(ambulanceId);
+      if (!currentAmbulance || currentAmbulance.status !== 'available') {
+        console.log('Ambulance no longer available');
+        setAssignmentInProgress(false);
+        setIsAssigning(false);
+        return;
+      }
+      
+      // Check if request is still pending
+      const request = await emergencyService.getById(requestId);
+      if (!request || request.status !== 'pending') {
+        console.log('Request already taken by another driver');
+        // Remove from pending list
+        setPendingRequests(prev => prev.filter(req => req.id !== requestId));
+        setAcceptedRequestIds(prev => new Set([...prev, requestId]));
+        setAssignmentInProgress(false);
+        setIsAssigning(false);
+        return;
+      }
+      
+      // Update request status
+      await emergencyService.updateRequest(requestId, {
+        status: 'assigned',
+        assignedAmbulanceId: ambulanceId,
+      });
+      
+      // Update ambulance status
+      await ambulanceService.updateStatus(ambulanceId, 'on_trip');
+      
+      // Clear pending requests and mark as accepted
+      setPendingRequests([]);
+      setAcceptedRequestIds(prev => new Set([...prev, requestId]));
+      setShowNotification(false);
+      
+      console.log('Request successfully assigned:', requestId);
+    } catch (error) {
+      console.error('Error accepting request:', error);
+    } finally {
+      setAssignmentInProgress(false);
+      setIsAssigning(false);
+    }
   };
 
   const handleDeclineRequest = async (requestId: string) => {
     console.log('Declining request:', requestId);
-    // Remove from local state - in production, you might want to track declined requests
+    
+    // Mark as declined so we don't see it again
+    setAcceptedRequestIds(prev => new Set([...prev, requestId]));
     setPendingRequests(prev => prev.filter(req => req.id !== requestId));
   };
 
   const handleCompleteRequest = async () => {
     if (currentRequest) {
-      await emergencyService.updateRequest(currentRequest.id, { status: 'completed' });
-      await ambulanceService.updateStatus(ambulanceId, 'available');
-      setCurrentRequest(null);
+      try {
+        await emergencyService.updateRequest(currentRequest.id, { status: 'completed' });
+        await ambulanceService.updateStatus(ambulanceId, 'available');
+        setCurrentRequest(null);
+        
+        // Clear any pending notifications
+        setShowNotification(false);
+        setAssignmentInProgress(false);
+      } catch (error) {
+        console.error("Error completing request:", error);
+      }
     }
   };
 
   const handleStartTrip = async () => {
     if (currentRequest) {
-      await emergencyService.updateRequest(currentRequest.id, { status: 'en_route' });
+      try {
+        await emergencyService.updateRequest(currentRequest.id, { status: 'en_route' });
+      } catch (error) {
+        console.error("Error starting trip:", error);
+      }
     }
   };
 
@@ -209,11 +321,12 @@ useEffect(() => {
             </div>
             <button
               onClick={handleToggleOnline}
+              disabled={isAssigning}
               className={`px-6 py-3 rounded-lg font-semibold transition-colors flex items-center ${
                 isOnline
                   ? 'bg-red-600 text-white hover:bg-red-700 shadow-lg'
                   : 'bg-green-600 text-white hover:bg-green-700 shadow-lg'
-              }`}
+              } ${isAssigning ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               <div className={`w-2 h-2 rounded-full mr-2 ${isOnline ? 'bg-red-200 animate-pulse' : 'bg-green-200'}`}></div>
               {isOnline ? 'Go Offline' : 'Go Online'}
@@ -325,7 +438,7 @@ useEffect(() => {
                       </div>
                       <div className="flex items-center">
                         <Clock className="h-4 w-4 text-gray-500 mr-2" />
-                        <span className="text-sm">{request.createdAt.toLocaleTimeString()}</span>
+                        <span className="text-sm">{request.createdAt?.toLocaleTimeString() || 'Just now'}</span>
                       </div>
                     </div>
                     
@@ -344,13 +457,26 @@ useEffect(() => {
                   <div className="flex space-x-3">
                     <button
                       onClick={() => handleAcceptRequest(request.id)}
-                      className="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors font-semibold flex items-center justify-center"
+                      disabled={isAssigning}
+                      className={`flex-1 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors font-semibold flex items-center justify-center ${
+                        isAssigning ? 'opacity-50 cursor-not-allowed' : ''
+                      }`}
                     >
-                      <CheckCircle className="h-4 w-4 mr-2" />
-                      Accept Emergency
+                      {isAssigning ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                          Assigning...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="h-4 w-4 mr-2" />
+                          Accept Emergency
+                        </>
+                      )}
                     </button>
                     <button
                       onClick={() => handleDeclineRequest(request.id)}
+                      disabled={isAssigning}
                       className="flex-1 bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors font-semibold flex items-center justify-center"
                     >
                       <XCircle className="h-4 w-4 mr-2" />
@@ -486,33 +612,20 @@ useEffect(() => {
         )}
 
         {/* Map */}
-        {/* Map */}
-{location && (
-  <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-    <GoogleMap
-  center={location}
-
-  // ambulance
-  userLocation={location}
-
-  // patient
-  patientLocation={currentRequest?.location}
-
-  // hospitals
-  hospitals={nearbyHospitals}
-
-  ambulances={[]}
-
-  destination={currentRequest?.location}
-  showRoute={!!currentRequest}
-
-  className="h-96 w-full"
-/>
-
-
-  </div>
-)}
-
+        {location && (
+          <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+            <GoogleMap
+              center={location}
+              userLocation={location}
+              patientLocation={currentRequest?.location}
+              hospitals={nearbyHospitals}
+              ambulances={[]}
+              destination={currentRequest?.location}
+              showRoute={!!currentRequest}
+              className="h-96 w-full"
+            />
+          </div>
+        )}
       </div>
     </div>
   );
