@@ -25,7 +25,9 @@ export const ConfirmEmergency: React.FC = () => {
       }
 
       try {
-        const response = await fetch(`/token/${token}`);
+        const API = "https://swasthsuraksha.onrender.com";
+        const response = await fetch(`${API}/token/${token}`);
+        
         if (!response.ok) {
           throw new Error('Invalid token');
         }
