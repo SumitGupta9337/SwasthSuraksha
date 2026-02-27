@@ -58,7 +58,8 @@ router.post("/incoming-call", async (req, res) => {
       used: false,
     };
 
-    const link = `https://arden-uncombined-librada.ngrok-free.dev/confirm/${token}`;
+    const frontendUrl = process.env.FRONTEND_URL;
+    const link = `${frontendUrl}/confirm/${token}`;
 
     const msg = await client.messages.create({
       body: `🚑 SwasthSuraksha Emergency: Click here: ${link}`,
