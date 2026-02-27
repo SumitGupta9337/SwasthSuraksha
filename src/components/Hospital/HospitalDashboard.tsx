@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Building2, Bed, Users, Activity, Save, Plus, Minus, TrendingUp, Clock, MapPin,
-  Calendar, AlertCircle, CheckCircle, XCircle, RotateCcw, Download, Printer,
-  Settings, BarChart3, Ambulance, Phone, Mail, UserCheck, UserX, ClipboardList,
-  Thermometer, Heart, Stethoscope, Pill, Syringe, FileText, DownloadCloud,
-  DoorOpen, Hash, UserPlus, Users2, BookOpen, QrCode
+  Building2, Bed, Users, Activity, Save, Plus, TrendingUp, MapPin,
+   CheckCircle, XCircle, Printer,
+   BarChart3, UserCheck, ClipboardList, DownloadCloud,
+  DoorOpen, Hash, UserPlus, Users2
 } from 'lucide-react';
 import { GoogleMap } from '../Map/GoogleMap';
 import { hospitalService } from '../../services/firebaseService';
@@ -17,9 +16,8 @@ interface BedAllocation {
   patientAge: number;
   patientGender: 'male' | 'female' | 'other';
   bedType: 'icu' | 'oxygen' | 'general';
-  bedNumber: string;
+  bedNumber: string; // Simple number like "101", "203", etc.
   roomNumber: string;
-  floorNumber?: string;
   admissionDate: Date;
   estimatedDischarge: Date;
   doctorName: string;
@@ -83,11 +81,15 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
   const [showVisitorForm, setShowVisitorForm] = useState(false);
   const [showVisitorsList, setShowVisitorsList] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [bedNumberError, setBedNumberError] = useState<string>('');
+  const [roomNumberError, setRoomNumberError] = useState<string>('');
   const [newAllocation, setNewAllocation] = useState<Partial<BedAllocation>>({
     bedType: 'general',
     condition: 'stable',
     admissionDate: new Date(),
-    emergencyContact: { name: '', relation: '', phone: '' }
+    emergencyContact: { name: '', relation: '', phone: '' },
+    bedNumber: '',
+    roomNumber: ''
   });
   const [newVisitor, setNewVisitor] = useState<Partial<Visitor>>({
     purpose: 'general',
@@ -124,9 +126,8 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
         patientAge: 65,
         patientGender: 'male',
         bedType: 'icu',
-        bedNumber: 'ICU-101',
+        bedNumber: '101',
         roomNumber: '201',
-        floorNumber: 'Floor 2',
         admissionDate: new Date(2024, 0, 15),
         estimatedDischarge: new Date(2024, 0, 20),
         doctorName: 'Dr. Sharma',
@@ -145,9 +146,8 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
         patientAge: 45,
         patientGender: 'female',
         bedType: 'oxygen',
-        bedNumber: 'OXY-203',
+        bedNumber: '203',
         roomNumber: '305',
-        floorNumber: 'Floor 3',
         admissionDate: new Date(2024, 0, 16),
         estimatedDischarge: new Date(2024, 0, 19),
         doctorName: 'Dr. Verma',
@@ -166,9 +166,8 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
         patientAge: 30,
         patientGender: 'male',
         bedType: 'general',
-        bedNumber: 'GEN-045',
+        bedNumber: '45',
         roomNumber: '112',
-        floorNumber: 'Floor 1',
         admissionDate: new Date(2024, 0, 17),
         estimatedDischarge: new Date(2024, 0, 18),
         doctorName: 'Dr. Gupta',
@@ -255,26 +254,57 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
     });
   };
 
-  const generateBedNumber = (type: string): string => {
-    const prefix = type === 'icu' ? 'ICU' : type === 'oxygen' ? 'OXY' : 'GEN';
-    const number = Math.floor(Math.random() * 100) + 1;
-    return `${prefix}-${number.toString().padStart(3, '0')}`;
-  };
-
-  const generateRoomNumber = (type: string): string => {
-    const floor = type === 'icu' ? '2' : type === 'oxygen' ? '3' : '1';
-    const room = Math.floor(Math.random() * 20) + 1;
-    return `${floor}${room.toString().padStart(2, '0')}`;
-  };
-
-  const getFloorFromRoom = (roomNumber: string): string => {
-    const floor = roomNumber.charAt(0);
-    switch(floor) {
-      case '1': return 'Ground Floor';
-      case '2': return 'First Floor';
-      case '3': return 'Second Floor';
-      default: return `Floor ${floor}`;
+  const validateBedNumber = (bedNumber: string, bedType: string): boolean => {
+    // Simple validation: just check if it's a number (can be 1-3 digits)
+    const pattern = /^\d{1,3}$/;
+    
+    if (!pattern.test(bedNumber)) {
+      setBedNumberError('Bed number must be a number (1-3 digits)');
+      return false;
     }
+    
+    // Check if bed number is already occupied for this bed type
+    const isOccupied = allocations.some(a => a.bedNumber === bedNumber && a.bedType === bedType);
+    if (isOccupied) {
+      setBedNumberError(`Bed number ${bedNumber} is already occupied for ${bedType} beds`);
+      return false;
+    }
+    
+    setBedNumberError('');
+    return true;
+  };
+
+  const validateRoomNumber = (roomNumber: string): boolean => {
+    // Check if room number follows format (1-3 digits)
+    const pattern = /^\d{1,3}$/;
+    
+    if (!pattern.test(roomNumber)) {
+      setRoomNumberError('Room number must be a number (1-3 digits)');
+      return false;
+    }
+    
+    setRoomNumberError('');
+    return true;
+  };
+
+  const prefillBedNumber = () => {
+    if (!newAllocation.bedType) return;
+    
+    // Find the next available bed number for the selected bed type
+    const existingNumbers = allocations
+      .filter(a => a.bedType === newAllocation.bedType)
+      .map(a => parseInt(a.bedNumber, 10))
+      .filter(num => !isNaN(num));
+    
+    let nextNumber = 1;
+    while (existingNumbers.includes(nextNumber)) {
+      nextNumber++;
+    }
+    
+    setNewAllocation({...newAllocation, bedNumber: nextNumber.toString()});
+    
+    // Validate the suggested bed number
+    validateBedNumber(nextNumber.toString(), newAllocation.bedType);
   };
 
   const handleBedCountUpdate = (type: keyof typeof bedCounts, field: 'total' | 'maintenance', value: number) => {
@@ -319,15 +349,40 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
   };
 
   const handleAllocateBed = () => {
-    if (!newAllocation.patientName || !newAllocation.bedType) {
-      alert('Please fill in patient name and select bed type');
+    // Validate required fields
+    if (!newAllocation.patientName) {
+      alert('Please enter patient name');
+      return;
+    }
+    
+    if (!newAllocation.bedType) {
+      alert('Please select bed type');
+      return;
+    }
+    
+    if (!newAllocation.bedNumber) {
+      alert('Please enter bed number');
+      return;
+    }
+    
+    if (!newAllocation.roomNumber) {
+      alert('Please enter room number');
       return;
     }
 
-    // Generate bed and room numbers
-    const bedNumber = generateBedNumber(newAllocation.bedType);
-    const roomNumber = generateRoomNumber(newAllocation.bedType);
-    const floorNumber = getFloorFromRoom(roomNumber);
+    // Validate bed number format
+    const isBedValid = validateBedNumber(newAllocation.bedNumber, newAllocation.bedType);
+    if (!isBedValid) {
+      alert(bedNumberError || 'Invalid bed number');
+      return;
+    }
+
+    // Validate room number format
+    const isRoomValid = validateRoomNumber(newAllocation.roomNumber);
+    if (!isRoomValid) {
+      alert(roomNumberError || 'Invalid room number');
+      return;
+    }
 
     const allocation: BedAllocation = {
       id: Date.now().toString(),
@@ -335,9 +390,8 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
       patientAge: newAllocation.patientAge || 0,
       patientGender: newAllocation.patientGender || 'male',
       bedType: newAllocation.bedType as 'icu' | 'oxygen' | 'general',
-      bedNumber,
-      roomNumber,
-      floorNumber,
+      bedNumber: newAllocation.bedNumber,
+      roomNumber: newAllocation.roomNumber,
       admissionDate: new Date(),
       estimatedDischarge: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       doctorName: newAllocation.doctorName || 'Dr. Assigned',
@@ -355,10 +409,14 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
       bedType: 'general', 
       condition: 'stable', 
       admissionDate: new Date(),
-      emergencyContact: { name: '', relation: '', phone: '' }
+      emergencyContact: { name: '', relation: '', phone: '' },
+      bedNumber: '',
+      roomNumber: ''
     });
+    setBedNumberError('');
+    setRoomNumberError('');
     
-    alert(`Patient admitted successfully!\nBed: ${bedNumber}, Room: ${roomNumber}`);
+    alert(`Patient admitted successfully!\nBed: ${allocation.bedNumber}, Room: ${allocation.roomNumber}`);
   };
 
   const handleAddVisitor = () => {
@@ -467,6 +525,10 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
     a.bedNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
     a.roomNumber.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const getBedNumberPlaceholder = () => {
+    return "e.g., 1, 101, 205";
+  };
 
   if (!hospital) {
     return (
@@ -855,13 +917,12 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
                       <div>
                         <div className="font-medium text-gray-900 flex items-center">
                           <Hash className="h-3 w-3 mr-1" />
-                          {allocation.bedNumber}
+                          Bed: {allocation.bedNumber}
                         </div>
                         <div className="text-sm text-gray-500 flex items-center">
                           <DoorOpen className="h-3 w-3 mr-1" />
                           Room: {allocation.roomNumber}
                         </div>
-                        <div className="text-xs text-gray-400">{allocation.floorNumber}</div>
                       </div>
                     </td>
                     <td className="px-6 py-4">
@@ -987,7 +1048,7 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
         </div>
       </div>
 
-      {/* New Admission Form Modal */}
+      {/* New Admission Form Modal - Updated with simple bed numbers */}
       {showAllocationForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -1029,15 +1090,18 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
                 </select>
               </div>
 
-              {/* Bed Assignment */}
+              {/* Bed Assignment - Updated with simple number format */}
               <div className="col-span-2">
                 <h4 className="font-medium text-gray-700 mb-2 mt-2">Bed Assignment</h4>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Bed Type</label>
+              <div className="col-span-2 md:col-span-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Bed Type *</label>
                 <select
                   value={newAllocation.bedType || 'general'}
-                  onChange={(e) => setNewAllocation({...newAllocation, bedType: e.target.value as any})}
+                  onChange={(e) => {
+                    setNewAllocation({...newAllocation, bedType: e.target.value as any, bedNumber: ''});
+                    setBedNumberError('');
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 >
                   <option value="general">General Ward</option>
@@ -1045,7 +1109,58 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
                   <option value="icu">ICU Bed</option>
                 </select>
               </div>
-              <div>
+              <div className="col-span-2 md:col-span-1">
+                <div className="flex items-end space-x-2">
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Bed Number *</label>
+                    <input
+                      type="text"
+                      value={newAllocation.bedNumber || ''}
+                      onChange={(e) => {
+                        setNewAllocation({...newAllocation, bedNumber: e.target.value});
+                        if (newAllocation.bedType) {
+                          validateBedNumber(e.target.value, newAllocation.bedType);
+                        }
+                      }}
+                      className={`w-full px-3 py-2 border rounded-lg ${
+                        bedNumberError ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-green-500'
+                      }`}
+                      placeholder={getBedNumberPlaceholder()}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={prefillBedNumber}
+                    disabled={!newAllocation.bedType}
+                    className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed mb-0.5"
+                    title="Suggest next available bed number"
+                  >
+                    Suggest
+                  </button>
+                </div>
+                {bedNumberError && (
+                  <p className="text-xs text-red-600 mt-1">{bedNumberError}</p>
+                )}
+              </div>
+              <div className="col-span-2 md:col-span-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Room Number *</label>
+                <input
+                  type="text"
+                  value={newAllocation.roomNumber || ''}
+                  onChange={(e) => {
+                    setNewAllocation({...newAllocation, roomNumber: e.target.value});
+                    validateRoomNumber(e.target.value);
+                  }}
+                  className={`w-full px-3 py-2 border rounded-lg ${
+                    roomNumberError ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-green-500'
+                  }`}
+                  placeholder="e.g., 101, 205, 312"
+                />
+                {roomNumberError && (
+                  <p className="text-xs text-red-600 mt-1">{roomNumberError}</p>
+                )}
+              </div>
+              <div className="col-span-2 md:col-span-1">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Doctor Name</label>
                 <input
                   type="text"
@@ -1060,7 +1175,7 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
               <div className="col-span-2">
                 <h4 className="font-medium text-gray-700 mb-2 mt-2">Medical Information</h4>
               </div>
-              <div>
+              <div className="col-span-2 md:col-span-1">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Condition</label>
                 <select
                   value={newAllocation.condition || 'stable'}
@@ -1072,7 +1187,7 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
                   <option value="recovering">Recovering</option>
                 </select>
               </div>
-              <div className="flex items-center space-x-4">
+              <div className="col-span-2 md:col-span-1 flex items-center space-x-4">
                 <label className="flex items-center">
                   <input
                     type="checkbox"
@@ -1097,7 +1212,7 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
               <div className="col-span-2">
                 <h4 className="font-medium text-gray-700 mb-2 mt-2">Emergency Contact</h4>
               </div>
-              <div>
+              <div className="col-span-2 md:col-span-1">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Contact Name</label>
                 <input
                   type="text"
@@ -1113,7 +1228,7 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
-              <div>
+              <div className="col-span-2 md:col-span-1">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Relation</label>
                 <input
                   type="text"
@@ -1150,7 +1265,11 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
 
             <div className="flex justify-end space-x-3 mt-6">
               <button
-                onClick={() => setShowAllocationForm(false)}
+                onClick={() => {
+                  setShowAllocationForm(false);
+                  setBedNumberError('');
+                  setRoomNumberError('');
+                }}
                 className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 Cancel
@@ -1182,7 +1301,7 @@ export const HospitalDashboard: React.FC<HospitalDashboardProps> = ({
                   <option value="">Choose patient</option>
                   {allocations.map(patient => (
                     <option key={patient.id} value={patient.id}>
-                      {patient.patientName} - {patient.bedNumber} (Room {patient.roomNumber})
+                      {patient.patientName} - Bed {patient.bedNumber} (Room {patient.roomNumber})
                     </option>
                   ))}
                 </select>
