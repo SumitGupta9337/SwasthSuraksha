@@ -72,11 +72,11 @@ router.post("/incoming-call", async (req, res) => {
     res.type("text/xml");
     res.send(`
       <Response>
-        <Say voice="alice" language="en-IN">
-          We have sent you an SMS. Tap the link to request an ambulance.
-        </Say>
-        <Hangup/>
-      </Response>
+  <Say voice="Polly.Aditi" language="hi-IN">
+    हमने आपको एक एसएमएस भेजा है। एम्बुलेंस बुलाने के लिए कृपया लिंक पर क्लिक करें।
+  </Say>
+  <Hangup/>
+</Response>
     `);
   } catch (error) {
     console.error("Incoming call error:", error.message);
