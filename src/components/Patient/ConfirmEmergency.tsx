@@ -54,10 +54,10 @@ export const ConfirmEmergency: React.FC = () => {
       return;
     }
 
-    if (!patientName.trim()) {
-      alert('Patient name is required');
-      return;
-    }
+    // if (!patientName.trim()) {
+    //   alert('Patient name is required');
+    //   return;
+    // }
 
     setIsSubmitting(true);
 
@@ -139,7 +139,7 @@ export const ConfirmEmergency: React.FC = () => {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               <User className="h-4 w-4 inline mr-1" />
-              Patient Name *
+              Patient Name 
             </label>
             <input
               type="text"
@@ -147,7 +147,7 @@ export const ConfirmEmergency: React.FC = () => {
               onChange={(e) => setPatientName(e.target.value)}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent text-base"
               placeholder="Enter patient name"
-              required
+             // required
             />
           </div>
 
