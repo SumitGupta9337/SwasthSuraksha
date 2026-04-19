@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, MapPin, Phone, Truck, Navigation } from 'lucide-react';
+import { Clock, MapPin, Phone, Truck, Navigation, AlertCircle, X, Heart, Shield, Info } from 'lucide-react';
 import { GoogleMap } from '../Map/GoogleMap';
 import { emergencyService, ambulanceService, hospitalService } from '../../services/firebaseService';
 import { EmergencyRequest, Ambulance, Hospital } from '../../types';
@@ -7,6 +7,165 @@ import { EmergencyRequest, Ambulance, Hospital } from '../../types';
 interface EmergencyTrackingProps {
   requestId: string;
 }
+
+// Emergency Guide Popup Component
+const EmergencyGuidePopup: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
+  if (!isOpen) return null;
+
+  const emergencyTips = [
+    {
+      title: "Stay Calm",
+      description: "Take deep breaths and try to remain calm. Panic can make the situation worse.",
+      icon: <Heart className="h-5 w-5 text-red-500" />,
+      color: "bg-red-50 border-red-200"
+    },
+    {
+      title: "Call Emergency Services",
+      description: "Dial 108 (Ambulance) or 112 (Emergency) immediately. Provide clear information about your location and situation.",
+      icon: <Phone className="h-5 w-5 text-blue-500" />,
+      color: "bg-blue-50 border-blue-200"
+    },
+    {
+      title: "Provide Basic First Aid",
+      description: "If trained, provide basic first aid. For bleeding, apply pressure. For burns, cool with water. Don't move injured person unless necessary.",
+      icon: <Shield className="h-5 w-5 text-green-500" />,
+      color: "bg-green-50 border-green-200"
+    },
+    {
+      title: "Gather Information",
+      description: "Note the person's symptoms, medical conditions, allergies, and medications. This helps medical professionals.",
+      icon: <Info className="h-5 w-5 text-purple-500" />,
+      color: "bg-purple-50 border-purple-200"
+    }
+  ];
+
+  const emergencyContacts = [
+    { name: "Ambulance", number: "108", description: "Emergency Ambulance Service" },
+    { name: "Police", number: "100", description: "Police Emergency" },
+    { name: "Fire", number: "101", description: "Fire Brigade" },
+    { name: "Disaster Management", number: "1070", description: "National Emergency" },
+    { name: "Women Helpline", number: "1091", description: "Women in Distress" },
+    { name: "Child Helpline", number: "1098", description: "Children in Need" }
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      {/* Backdrop */}
+      <div 
+        className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+        onClick={onClose}
+      />
+      
+      {/* Modal */}
+      <div className="relative min-h-screen flex items-center justify-center p-4">
+        <div className="relative bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+          {/* Header */}
+          <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-red-100 rounded-full">
+                <AlertCircle className="h-6 w-6 text-red-600" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Emergency Guide</h2>
+                <p className="text-sm text-gray-500">What to do in emergency situations</p>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-gray-100 rounded-full transition"
+            >
+              <X className="h-5 w-5 text-gray-500" />
+            </button>
+          </div>
+
+          {/* Content */}
+          <div className="p-6 space-y-6">
+            {/* Critical Alert */}
+            <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
+              <div className="flex items-start">
+                <AlertCircle className="h-5 w-5 text-red-500 mt-0.5 mr-3 flex-shrink-0" />
+                <div>
+                  <h3 className="font-semibold text-red-800">First Priority: Call for Help</h3>
+                  <p className="text-red-700 mt-1">
+                    If the person is unconscious, not breathing, or has severe bleeding, 
+                    call emergency services immediately before doing anything else.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Tips Grid */}
+            <div>
+              <h3 className="font-semibold text-gray-900 mb-3">Essential Steps</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {emergencyTips.map((tip, index) => (
+                  <div key={index} className={`border rounded-lg p-4 ${tip.color}`}>
+                    <div className="flex items-start gap-3">
+                      <div className="flex-shrink-0">{tip.icon}</div>
+                      <div>
+                        <h4 className="font-semibold text-gray-900">{tip.title}</h4>
+                        <p className="text-sm text-gray-700 mt-1">{tip.description}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Emergency Contacts */}
+            <div>
+              <h3 className="font-semibold text-gray-900 mb-3">Emergency Contact Numbers</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {emergencyContacts.map((contact, index) => (
+                  <div key={index} className="bg-gray-50 rounded-lg p-3 flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-gray-900">{contact.name}</p>
+                      <p className="text-xs text-gray-500">{contact.description}</p>
+                    </div>
+                    <a 
+                      href={`tel:${contact.number}`}
+                      className="px-3 py-1 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition"
+                    >
+                      Call {contact.number}
+                    </a>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Additional Tips */}
+            <div className="bg-blue-50 rounded-lg p-4">
+              <h4 className="font-semibold text-blue-900 mb-2">💡 Pro Tips</h4>
+              <ul className="space-y-2 text-sm text-blue-800">
+                <li>• Keep a first aid kit at home and in your car</li>
+                <li>• Save emergency contacts on your phone's speed dial</li>
+                <li>• Learn basic CPR and first aid - it can save lives</li>
+                <li>• Share your live location with emergency contacts</li>
+                <li>• Keep medical information (allergies, conditions) accessible</li>
+              </ul>
+            </div>
+
+            {/* Disclaimer */}
+            <div className="text-xs text-gray-400 border-t pt-4">
+              Disclaimer: This information is for general guidance only. Always follow 
+              instructions from professional emergency responders and medical personnel.
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-end">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export const EmergencyTracking: React.FC<EmergencyTrackingProps> = ({
   requestId,
@@ -25,6 +184,9 @@ export const EmergencyTracking: React.FC<EmergencyTrackingProps> = ({
   const [page, setPage] = useState(0);
   const [registeredHospitalsError, setRegisteredHospitalsError] = useState<string | null>(null);
   const [allRegisteredHospitals, setAllRegisteredHospitals] = useState<Hospital[]>([]);
+  
+  // State for emergency guide popup
+  const [showEmergencyGuide, setShowEmergencyGuide] = useState(false);
 
   // Fetch all registered hospitals once
   useEffect(() => {
@@ -202,7 +364,7 @@ export const EmergencyTracking: React.FC<EmergencyTrackingProps> = ({
   // Load Google Places hospitals
   useEffect(() => {
     let isMounted = true;
-    let retryTimeout: NodeJS.Timeout;
+    let retryTimeout: ReturnType<typeof setTimeout>;
 
     const searchGoogleHospitals = () => {
       if (!request?.location) return;
@@ -787,6 +949,24 @@ export const EmergencyTracking: React.FC<EmergencyTrackingProps> = ({
           )}
         </div>
       </div>
+
+      {/* Floating Emergency Button */}
+      <button
+        onClick={() => setShowEmergencyGuide(true)}
+        className="fixed bottom-6 right-6 z-40 bg-red-600 text-white rounded-full p-4 shadow-lg hover:bg-red-700 transition transform hover:scale-105 flex items-center gap-2 group"
+        aria-label="Emergency Guide"
+      >
+        <AlertCircle className="h-6 w-6" />
+        <span className="hidden md:inline font-medium max-w-0 group-hover:max-w-xs transition-all duration-300 overflow-hidden whitespace-nowrap">
+          Emergency Guide
+        </span>
+      </button>
+
+      {/* Emergency Guide Popup */}
+      <EmergencyGuidePopup 
+        isOpen={showEmergencyGuide} 
+        onClose={() => setShowEmergencyGuide(false)} 
+      />
     </div>
   );
 };
